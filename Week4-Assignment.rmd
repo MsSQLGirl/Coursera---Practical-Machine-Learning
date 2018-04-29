@@ -1,0 +1,158 @@
+---
+title: "Practical Machine Learning - Week 4 Assignment "
+output: html_document
+author: "Julie Koesmarno"
+---
+*Date Prepared: `r Sys.Date()`* 
+
+Task: 
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did.
+You will also use your prediction model to predict 20 different test cases.
+
+## Step 1: Prepare required library and dataset 
+Load library, dataset and set the seed so that it's reproducable. The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. 
+```{r}
+library(caret);
+library(mlbench);
+library(gbm);
+library(randomForest)
+
+# Reusable function for "not in"
+'%ni%' <- Negate('%in%')
+
+# Load dataset
+train <- read.csv("~/pml-training.csv", header = TRUE);
+test <- read.csv("~/pml-testing.csv", header = TRUE);
+
+
+# Set seed so that it's reproducible
+set.seed(123)
+```
+
+## Step 2: Choose predictors 
+There are `r length(colnames(train))` columns in the dataset, so we should carefully select the predictors that we want to use. 
+
+A. Remove NA Values
+
+When you look at the data, there are quite `r length(names(train[, sapply(train, function(x) sum(is.na(x))) != 0]))` columns with "NA" values. These should go as they don't help the model.
+
+```{r}
+ytrain <- train[, sapply(train, function(x) sum(is.na(x))) == 0]
+```
+
+B. Remove Near Zero Variance 
+
+We should also remove those that are near-zero variance columns. Most of the data are numerical, except for user_name and classe. 
+```{r}
+# Remove NA columns
+ytrain <- train[, sapply(train, function(x) sum(is.na(x))) == 0];
+summary(ytrain$user_name);
+summary(ytrain$classe);
+# Remove nearZeroVar, in this case it is OK to use NZV as the values are mostly numeric.
+x <- nearZeroVar(ytrain, saveMetrics = TRUE, freqCut = 19)
+a <- x[(x[, "zeroVar"] + x[, "nzv"]) > 0,]
+
+ytrain <- ytrain[, colnames(ytrain)[colnames(ytrain) %ni% rownames(a)]]
+```
+C. Remove features that are highly correlated.
+
+Highly correlated features should also be removed. 
+
+```{r}
+# Only include the ones that make sense i.e. no time stamps and no user names. 
+ytrain <- ytrain[, c(2, 6:59)]
+colnames(ytrain)
+
+correlationMatrix <- cor(ytrain[, c(2:54)], use = "na.or.complete")
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff = 0.75)
+ytrain <- ytrain[, - c(highlyCorrelated + 1)]
+```
+
+## Step 3. Using GBM find the best variables to choose from
+ Depsite narrowing down the feature selection from the above manual steps, there are still too many variables, `r length(colnames(ytrain))`. Using gbm, let's find out the best variables to choose from the narrowed down variables.  There are a few configurations that we do to optimize *gbm*.
+
+* distribution is "multinomial" because there are multi classes that we want to predict
+
+* n.tree is set to 10 to represent the number of representations. For tihs purpose, 10 should be enough.
+
+* cv.folds is set to more than one for multinomial.
+
+```{r}
+mod <- gbm(classe ~ .,
+           data = ytrain,
+           distribution = "multinomial",
+           n.tree = 10,
+           shrinkage = 0.001,
+           cv.folds = 2,
+           bag.fraction = 0.8,
+           interaction.depth = 3,
+           verbose = FALSE)
+
+modVarImp <- varImp(mod, numTrees = 10);
+modVarImp <- data.frame(feature = rownames(modVarImp), Overall = modVarImp$Overall);
+finalPredictors <- modVarImp[modVarImp$Overall > 0, 1];
+#qplot(x = feature, y = Overall, data = modVarImp)
+
+```
+Now we have all the variables to use as predictors as *finalPredictors*. 
+
+## Step 4. Create a training model for prediction
+Let's create a model based on a subset of the *train* dataset. For the purpose of this exercise, let's do 10% sample. We will do validate if the train model from the small set of data is good enough for the rest of the *train* dataset. Here we are creating Random Forest model with cross validation set to 10. 
+```{r}
+# Create xtrain to represent the train data set with the selected important variables. 
+xtrain <- ytrain[, names(ytrain) %in% finalPredictors];
+xtrain$classe <- train$classe;
+
+# Let's now split the dataset in xtrain to 10%. This is needed to help speed up the creation of the model. 
+inTrain <- createDataPartition(y = xtrain$classe, p = 0.1, list = FALSE);
+xTrainSmall <- xtrain[inTrain,];
+xTrainBig <- xtrain[-inTrain,];
+
+# Now create Random Forest model to the 10% representation of the population. 
+xTrainSmallModel <- train(classe ~ ., data = xTrainSmall, method = "rf", trControl = trainControl(method = "cv", number = 10), prox = TRUE, allowParallel = TRUE)
+
+# Checking the sample size to do prediction
+print(xTrainSmallModel)
+```
+As seen above, xTrainSmallModel seems to have a small OOB value. Now let's take a quick look what are the new variables that are important. 
+
+```{r}
+v <- varImp(xTrainSmallModel)
+qplot(x = rownames(v), y = Overall, data = v)
+```
+
+# Step 5: Validate the model
+Let's validate results from the small *train* dataset against the rest of the *train* dataset.
+
+```{r}
+xTrainBigPredicted <- predict(xTrainSmallModel, newdata = xTrainBig[, -11], type = "prob")
+xTrainBigPredictedVal <- data.frame(pred_classe = colnames(xTrainBigPredicted)[apply(xTrainBigPredicted, 1, which.max)], max = apply(xTrainBigPredicted, 1, max))
+
+xtab <- table(xTrainBigPredictedVal$pred_classe, xTrainBig$classe)
+confusionMatrix(xtab)
+```
+Using `confusionMatrix` we can see that the accuracy is fairly good.
+
+Now let's inspect the final model's error rate and the class error
+```{r}
+# Check OOB error
+xTrainSmallModel$finalModel
+
+# Get the Class Error
+xTrainSmallModel$finalModel$confusion[, 'class.error']
+```
+# Step 6: Predict *test* dataset
+Now let's use *xTrainSmallModel* to predict the *test* dataset.
+```{r}
+# Use to predict 
+testpredicted <- predict(xTrainSmallModel, newdata = test[, names(test) %in% finalPredictors], type = "prob")
+
+data.frame(pred_classe = colnames(testpredicted)[apply(testpredicted, 1, which.max)],
+                  probability = apply(testpredicted, 1, max))
+
+```
+
+# Closing Word
+Using quick data exploration, correlation plot, GBM and Random Forest, you can easily create a nice predictive modeling across large dataset with many columns. 
+
+Thanks for reading!
