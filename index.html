@@ -331,8 +331,8 @@ test &lt;- read.csv(&quot;~/pml-testing.csv&quot;, header = TRUE);
 # Set seed so that it's reproducible
 set.seed(123)</code></pre>
 </section>
-<section id="step-2-choose-predictors." class="level2">
-<h2>Step 2: Choose predictors.</h2>
+<section id="step-2-choose-predictors" class="level2">
+<h2>Step 2: Choose predictors</h2>
 <p>There are 160 columns in the dataset, so we should carefully select the predictors that we want to use.</p>
 <p>A. Remove NA Values</p>
 <p>When you look at the data, there are quite 67 columns with “NA” values. These should go as they don’t help the model.</p>
@@ -380,8 +380,8 @@ colnames(ytrain)</code></pre>
 highlyCorrelated &lt;- findCorrelation(correlationMatrix, cutoff = 0.75)
 ytrain &lt;- ytrain[, - c(highlyCorrelated + 1)]</code></pre>
 </section>
-<section id="step-3.-using-gbm-find-the-best-variables-to-choose-from." class="level2">
-<h2>Step 3. Using GBM find the best variables to choose from.</h2>
+<section id="step-3.-using-gbm-find-the-best-variables-to-choose-from" class="level2">
+<h2>Step 3. Using GBM find the best variables to choose from</h2>
 <p>Depsite narrowing down the feature selection from the above manual steps, there are still too many variables, 34. Using gbm, let’s find out the best variables to choose from the narrowed down variables. There are a few configurations that we do to optimize <em>gbm</em>.</p>
 <ul>
 <li><p>distribution is “multinomial” because there are multi classes that we want to predict</p></li>
@@ -404,8 +404,8 @@ finalPredictors &lt;- modVarImp[modVarImp$Overall &gt; 0, 1];
 #qplot(x = feature, y = Overall, data = modVarImp)</code></pre>
 <p>Now we have all the variables to use as predictors as <em>finalPredictors</em>.</p>
 </section>
-<section id="step-4.-create-a-training-model-for-prediction." class="level2">
-<h2>Step 4. Create a training model for prediction.</h2>
+<section id="step-4.-create-a-training-model-for-prediction" class="level2">
+<h2>Step 4. Create a training model for prediction</h2>
 <p>Let’s create a model based on a subset of the <em>train</em> dataset. For the purpose of this exercise, let’s do 10% sample. We will do validate if the train model from the small set of data is good enough for the rest of the <em>train</em> dataset. Here we are creating Random Forest model with cross validation set to 10.</p>
 <pre class="r"><code># Create xtrain to represent the train data set with the selected important variables. 
 xtrain &lt;- ytrain[, names(ytrain) %in% finalPredictors];
